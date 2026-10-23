@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>REKO — Keep Quality, Keep Frames</title>
+<meta name="description" content="REKO - Post TikTok Videos Without the Blur.">
+<link href="https://fonts.googleapis.com/css2?family=TikTok+Sans:wght@300..900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script>if (!window.crossOriginIsolated) {window.SharedArrayBuffer = undefined;}</script>
+<script src="./coi-serviceworker.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/remixicon@4.6.0/fonts/remixicon.css">
+<script type="importmap">
+{
+  "imports": {
+    "@ffmpeg/util": "https://esm.sh/@ffmpeg/util@0.12.2",
+    "@ffmpeg/ffmpeg": "https://esm.sh/@ffmpeg/ffmpeg@0.12.15"
+  }
+}
+</script>
+</head>
+<body>
+<div class="bg-orbs"><div class="orb orb1"></div><div class="orb orb2"></div><div class="orb orb3"></div></div>
+<div class="planes"><div class="plane plane1">✈️</div><div class="plane plane2">🚀</div><div class="plane plane3">⚡</div></div>
+<div class="page">
+<div class="hero-image-section">
+<div class="hero-bg"><img src="hero.jpg" alt="REKO"></div>
+<div class="hero-content">
+<h2>REKO <span>STUDIO</span></h2>
+<p>عندك فيديو <b>1080p</b>؟ تيك توك ينزل جودته. هذا يثبت الجودة والفريمات — بصور PUBG!</p>
+<div class="hero-badges">
+<span class="badge">1080p → 2K</span>
+<span class="badge">60 FPS</span>
+<span class="badge electric">⚡ خنفشاري</span>
+</div>
+</div>
+</div>
+<div class="panel panel-header">
+<div class="header">
+<div class="header-title">REKO</div>
+<div class="header-subtitle">Keep Quality • Keep Frames • No Blur • 1080p → 2K • 60fps • مع الصور</div>
+</div>
+</div>
+<div class="container">
+<div class="panel panel-left">
+<div class="control-box">
+<div class="interpolator-box">
+<div class="interpolator-header">
+<span class="interpolator-title">VIDEO SETTING / إعدادات الفيديو</span>
+</div>
+<div class="res-grid">
+<div class="res-opt active" data-res="1080" onclick="setRes1080('1080',this)"><b>1080p</b><span>الأصلية - 1920x1080</span></div>
+<div class="res-opt" data-res="1440" onclick="setRes1080('1440',this)"><b>2K</b><span>1440p - 2560x1440</span></div>
+<div class="res-opt" data-res="original" onclick="setRes1080('original',this)"><b>ORIG</b><span>Original - مثل ما هي</span></div>
+</div>
+<div class="interpolator-options">
+<label class="checkbox-container">
+<input type="checkbox" id="enableInterpolation">
+<span class="checkmark"></span>
+<span class="label-text">Enable 60fps Interpolation</span>
+</label>
+<div class="interpolator-description">Creates intermediate frames to produce 60fps output. Uses local FFmpeg VFI engine.</div>
+</div>
+<div class="interpolator-resolution" id="vfiResolutionBox" style="display: block;">
+<div class="stat-item">
+<span class="stat-label">OUTPUT RESOLUTION - الدقة</span>
+<select class="stat-select" id="outputResolution">
+<option value="1080" selected>1080p - الف وثمانين</option>
+<option value="1440">2K (1440p)</option>
+<option value="original">Original - الأصلية</option>
+</select>
+</div>
+</div>
+<div class="interpolator-info">
+<div class="interpolator-note">
+<i class="ri-cpu-fill"></i>
+<span>Processing speed depends on device hardware. يدعم 1080p → 2K — الزر ظاهر هسه!</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="panel panel-right">
+<div class="drop-zone" id="dropZone">
+<div class="brutalist-upload-box">
+<i class="ri-upload-2-fill"></i>
+</div>
+<div class="drop-text">
+<div class="drop-text-primary">DROP VIDEOS HERE</div>
+<div class="drop-text-secondary">OR <span>SELECT FILES</span> FROM COMPUTER · MP4 / MOV</div>
+</div>
+</div>
+<div class="queue-and-actions-wrapper">
+<div class="queue-container">
+<div class="queue-header">
+<span class="queue-title">PROCESSING QUEUE</span>
+</div>
+<div class="file-list" id="fileList"></div>
+</div>
+<div class="control-actions">
+<div class="btn-row">
+<button class="btn btn-clear" id="clearBtn">Clear</button>
+<button class="btn btn-patch" id="patchBtn" disabled>
+<span>Patch Videos</span>
+</button>
+</div>
+<a class="btn btn-tiktok" id="tiktokStudioBtn" href="https://www.tiktok.com/tiktokstudio/upload" target="_blank" rel="noopener noreferrer">
+Upload to TikTok Studio
+</a>
+<div class="upload-note">
+<i class="ri-information-fill"></i>
+<span>Upload patched video via TikTok Studio web to ensure quality-preservation bypass works.</span>
+</div>
+<div class="progress-track" id="progressTrack">
+<div class="progress-bar" id="progressBar"></div>
+</div>
+</div>
+</div>
+<div class="history-container">
+<div class="history-header" id="historyHeader">
+<div class="history-header-left">
+<span class="history-title">HISTORY</span>
+<span class="history-badge" id="historyBadge">0</span>
+</div>
+<button class="history-toggle-btn" id="historyToggleBtn">
+<i class="ri-arrow-down-s-fill"></i>
+</button>
+</div>
+<div class="history-drawer" id="historyDrawer">
+<div class="history-list" id="historyList"></div>
+<div class="history-actions">
+<button class="btn-clear-history" id="clearHistoryBtn">Clear History</button>
+</div>
+</div>
+</div>
+<input type="file" id="fileInput" accept="video/mp4,video/quicktime,.mp4,.mov" multiple>
+</div>
+<div class="panel panel-log">
+<div class="log-header">
+<span class="log-title">SYSTEM STATUS LOG</span>
+<span class="log-copy-toast" id="copyLogToast">Copied</span>
+<button class="log-copy-btn" id="copyLogBtn" title="Copy log">
+<i class="ri-clipboard-fill"></i>
+</button>
+</div>
+<div class="status-log" id="statusLog"></div>
+</div>
+</div>
+</div>
+<div class="footer">
+REKO STUDIO • Keep Quality • 1080p button visible now! • بصور PUBG • خنفشاري<br>
+<span style="font-size:9px">Original buttons preserved — No bugs — 1080p زر ظاهر</span>
+</div>
+<div class="modal-overlay" id="vfiModal">
+<div class="modal-card">
+<div class="modal-header">
+<div class="modal-header-left">
+<i class="ri-flashlight-fill"></i>
+<span class="modal-title">60FPS INTERPOLATION</span>
+</div>
+<button class="modal-close-btn" id="closeVfiModalBtn">
+<i class="ri-close-fill"></i>
+</button>
+</div>
+<div class="modal-body">
+<div class="modal-warning-block">
+<i class="ri-alert-fill"></i>
+<span>Performance Warning</span>
+</div>
+<ul class="modal-warning-list">
+<li>Processing speed depends on hardware.</li>
+<li>Output resolution controlled by selector above — 1080p visible!</li>
+</ul>
+</div>
+<div class="modal-actions">
+<button class="modal-btn modal-btn-cancel" id="cancelVfiBtn">Cancel</button>
+<button class="modal-btn modal-btn-confirm" id="confirmVfiBtn">Enable Anyway</button>
+</div>
+</div>
+</div>
+<div class="modal-overlay" id="tiktokModal">
+<div class="modal-card">
+<div class="modal-header">
+<div class="modal-header-left">
+<i class="ri-upload-2-fill"></i>
+<span class="modal-title">UPLOAD TO TIKTOK STUDIO</span>
+</div>
+<button class="modal-close-btn" id="closeTiktokModalBtn">
+<i class="ri-close-fill"></i>
+</button>
+</div>
+<div class="modal-body">
+<div class="modal-warning-block">
+<i class="ri-information-fill"></i>
+<span>Enable Desktop Mode First</span>
+</div>
+<ul class="modal-warning-list">
+<li>TikTok Studio upload only works in desktop mode.</li>
+<li>Chrome: 3-dot → Desktop site</li>
+</ul>
+</div>
+<div class="modal-actions">
+<button class="modal-btn modal-btn-cancel" id="cancelTiktokModalBtn">Cancel</button>
+<a class="modal-btn modal-btn-confirm" id="confirmTiktokBtn" href="https://www.tiktok.com/tiktokstudio/upload" target="_blank">Open TikTok Studio</a>
+</div>
+</div>
+</div>
+<script>
+function setRes1080(res, el){
+  document.querySelectorAll('.res-opt').forEach(o=>o.classList.remove('active'));
+  el.classList.add('active');
+  const sel = document.getElementById('outputResolution');
+  if(sel){ sel.value = res; }
+  const logEl = document.getElementById('statusLog');
+  if(logEl){
+    const div = document.createElement('div');
+    div.textContent = '> ' + new Date().toLocaleTimeString() + ' — ⚡ Resolution: ' + res + ' - الف وثمانين ظاهر!';
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
