@@ -123,3 +123,57 @@ body::before{content:'';position:fixed;inset:0;z-index:-3;background:linear-grad
 .res-opt:hover{border-color:var(--green);transform:translateY(-1px)}
 .res-opt.active{border-color:var(--green);background:rgba(0,255,136,0.12);color:var(--green);box-shadow:0 0 15px rgba(0,255,136,0.2)}
 .res-opt b{display:block;font-size:12px;font-weight:900} .res-opt span{font-size:9px;color:var(--muted)}
+
+/* FIXED CLICKABLE DROP ZONE - المربع ينضغط */
+.drop-zone.clickable{
+  cursor:pointer!important;
+  position:relative;
+  z-index:10;
+  border:2px dashed rgba(0,255,136,0.3)!important;
+  background:radial-gradient(600px 200px at 50% 0%,rgba(0,255,136,0.08),transparent)!important;
+  transition:all 0.3s!important;
+}
+.drop-zone.clickable:hover{
+  border-color:#00FF88!important;
+  background:radial-gradient(600px 200px at 50% 0%,rgba(0,255,136,0.15),transparent)!important;
+  box-shadow:0 0 30px rgba(0,255,136,0.2)!important;
+  transform:translateY(-2px) scale(1.01)!important;
+}
+.drop-zone.clickable:active{
+  transform:scale(0.99)!important;
+  box-shadow:0 0 15px rgba(0,255,136,0.3)!important;
+}
+.drop-zone.clickable .brutalist-upload-box{
+  animation:pulseUpload 2s infinite;
+}
+@keyframes pulseUpload{
+  0%,100%{transform:scale(1);box-shadow:0 0 0 rgba(0,255,136,0)}
+  50%{transform:scale(1.05);box-shadow:0 0 20px rgba(0,255,136,0.3)}
+}
+.drop-zone.clickable::before{
+  content:'✅ قابل للضغط - اضغط هنا';
+  position:absolute;
+  top:-10px;
+  right:10px;
+  background:#00FF88;
+  color:#000;
+  font-size:9px;
+  font-weight:900;
+  padding:4px 8px;
+  border-radius:20px;
+  z-index:20;
+  box-shadow:0 0 10px #00FF88;
+}
+#fileInput{
+  display:block!important;
+  position:absolute!important;
+  top:-1000px!important;
+  left:-1000px!important;
+  width:1px!important;
+  height:1px!important;
+  opacity:0!important;
+}
+/* ONLY LOG MODE - counters frozen but drop zone still clickable */
+.file-list{opacity:0.3;pointer-events:none;filter:blur(1px);position:relative;min-height:40px}
+.file-list::after{content:'FROZEN - ثابت - بس اللوغ يتحرك';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,255,136,0.1);border:1px solid var(--green);padding:6px 10px;border-radius:8px;font-size:9px;color:var(--green);font-weight:900;white-space:nowrap}
+.status-log{border:2px solid var(--green)!important;box-shadow:0 0 20px rgba(0,255,136,0.2)!important}

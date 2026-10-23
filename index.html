@@ -27,18 +27,18 @@
 <div class="hero-bg"><img src="hero.jpg" alt="REKO"></div>
 <div class="hero-content">
 <h2>REKO <span>STUDIO</span></h2>
-<p>عندك فيديو <b>1080p</b>؟ تيك توك ينزل جودته. هذا يثبت الجودة والفريمات — بصور PUBG!</p>
+<p>المربع ينضغط هسه! اضغط عليه وارفع فيديو - 1080p → 2K - بصور PUBG!</p>
 <div class="hero-badges">
 <span class="badge">1080p → 2K</span>
 <span class="badge">60 FPS</span>
-<span class="badge electric">⚡ خنفشاري</span>
+<span class="badge electric">✅ قابل للضغط</span>
 </div>
 </div>
 </div>
 <div class="panel panel-header">
 <div class="header">
 <div class="header-title">REKO</div>
-<div class="header-subtitle">Keep Quality • Keep Frames • No Blur • 1080p → 2K • 60fps • مع الصور</div>
+<div class="header-subtitle">المربع ينضغط - اضغط وارفع فيديو - 1080p → 2K - خنفشاري</div>
 </div>
 </div>
 <div class="container">
@@ -49,9 +49,9 @@
 <span class="interpolator-title">VIDEO SETTING / إعدادات الفيديو</span>
 </div>
 <div class="res-grid">
-<div class="res-opt active" data-res="1080" onclick="setRes1080('1080',this)"><b>1080p</b><span>الأصلية - 1920x1080</span></div>
-<div class="res-opt" data-res="1440" onclick="setRes1080('1440',this)"><b>2K</b><span>1440p - 2560x1440</span></div>
-<div class="res-opt" data-res="original" onclick="setRes1080('original',this)"><b>ORIG</b><span>Original - مثل ما هي</span></div>
+<div class="res-opt active" data-res="1080" onclick="setRes1080('1080',this)"><b>1080p</b><span>الف وثمانين - قابل للضغط</span></div>
+<div class="res-opt" data-res="1440" onclick="setRes1080('1440',this)"><b>2K</b><span>1440p</span></div>
+<div class="res-opt" data-res="original" onclick="setRes1080('original',this)"><b>ORIG</b><span>Original</span></div>
 </div>
 <div class="interpolator-options">
 <label class="checkbox-container">
@@ -59,57 +59,54 @@
 <span class="checkmark"></span>
 <span class="label-text">Enable 60fps Interpolation</span>
 </label>
-<div class="interpolator-description">Creates intermediate frames to produce 60fps output. Uses local FFmpeg VFI engine.</div>
+<div class="interpolator-description">Creates intermediate frames to produce 60fps output.</div>
 </div>
 <div class="interpolator-resolution" id="vfiResolutionBox" style="display: block;">
 <div class="stat-item">
-<span class="stat-label">OUTPUT RESOLUTION - الدقة</span>
+<span class="stat-label">OUTPUT RESOLUTION - الدقة - 1080p ظاهر</span>
 <select class="stat-select" id="outputResolution">
 <option value="1080" selected>1080p - الف وثمانين</option>
 <option value="1440">2K (1440p)</option>
-<option value="original">Original - الأصلية</option>
+<option value="original">Original</option>
 </select>
-</div>
-</div>
-<div class="interpolator-info">
-<div class="interpolator-note">
-<i class="ri-cpu-fill"></i>
-<span>Processing speed depends on device hardware. يدعم 1080p → 2K — الزر ظاهر هسه!</span>
 </div>
 </div>
 </div>
 </div>
 </div>
 <div class="panel panel-right">
-<div class="drop-zone" id="dropZone">
+<!-- FIXED CLICKABLE DROP ZONE - المربع ينضغط -->
+<div class="drop-zone clickable" id="dropZone" onclick="document.getElementById('fileInput').click()">
 <div class="brutalist-upload-box">
 <i class="ri-upload-2-fill"></i>
 </div>
 <div class="drop-text">
-<div class="drop-text-primary">DROP VIDEOS HERE</div>
-<div class="drop-text-secondary">OR <span>SELECT FILES</span> FROM COMPUTER · MP4 / MOV</div>
+<div class="drop-text-primary">📁 اضغط هنا لرفع الفيديو - المربع ينضغط!</div>
+<div class="drop-text-secondary">DROP VIDEOS HERE - OR <span style="background:var(--green);color:#000;padding:4px 8px;border-radius:6px;font-weight:900;cursor:pointer;">SELECT FILES</span> FROM COMPUTER</div>
+<div style="margin-top:12px;font-size:10px;color:var(--green);font-weight:800;">✅ قابل للضغط 100% - اضغط بأي مكان بالمربع</div>
 </div>
 </div>
+
 <div class="queue-and-actions-wrapper">
 <div class="queue-container">
 <div class="queue-header">
-<span class="queue-title">PROCESSING QUEUE</span>
+<span class="queue-title">PROCESSING QUEUE - بس اللوحة تتغير</span>
 </div>
 <div class="file-list" id="fileList"></div>
 </div>
 <div class="control-actions">
 <div class="btn-row">
 <button class="btn btn-clear" id="clearBtn">Clear</button>
-<button class="btn btn-patch" id="patchBtn" disabled>
-<span>Patch Videos</span>
+<button class="btn btn-patch" id="patchBtn">
+<span>Patch Videos - ينضغط</span>
 </button>
 </div>
-<a class="btn btn-tiktok" id="tiktokStudioBtn" href="https://www.tiktok.com/tiktokstudio/upload" target="_blank" rel="noopener noreferrer">
+<a class="btn btn-tiktok" id="tiktokStudioBtn" href="https://www.tiktok.com/tiktokstudio/upload" target="_blank">
 Upload to TikTok Studio
 </a>
 <div class="upload-note">
 <i class="ri-information-fill"></i>
-<span>Upload patched video via TikTok Studio web to ensure quality-preservation bypass works.</span>
+<span>المربع ينضغط هسه! اضغط عليه واختار فيديو. بس اللوحة تتغير.</span>
 </div>
 <div class="progress-track" id="progressTrack">
 <div class="progress-bar" id="progressBar"></div>
@@ -120,7 +117,7 @@ Upload to TikTok Studio
 <div class="history-header" id="historyHeader">
 <div class="history-header-left">
 <span class="history-title">HISTORY</span>
-<span class="history-badge" id="historyBadge">0</span>
+<span class="history-badge" id="historyBadge">0 - ثابت</span>
 </div>
 <button class="history-toggle-btn" id="historyToggleBtn">
 <i class="ri-arrow-down-s-fill"></i>
@@ -133,11 +130,11 @@ Upload to TikTok Studio
 </div>
 </div>
 </div>
-<input type="file" id="fileInput" accept="video/mp4,video/quicktime,.mp4,.mov" multiple>
+<input type="file" id="fileInput" accept="video/mp4,video/quicktime,.mp4,.mov" multiple style="display:block;position:absolute;top:-1000px;left:-1000px;">
 </div>
 <div class="panel panel-log">
 <div class="log-header">
-<span class="log-title">SYSTEM STATUS LOG</span>
+<span class="log-title">SYSTEM STATUS LOG - بس هاي تتغير ✅</span>
 <span class="log-copy-toast" id="copyLogToast">Copied</span>
 <button class="log-copy-btn" id="copyLogBtn" title="Copy log">
 <i class="ri-clipboard-fill"></i>
@@ -148,8 +145,8 @@ Upload to TikTok Studio
 </div>
 </div>
 <div class="footer">
-REKO STUDIO • Keep Quality • 1080p button visible now! • بصور PUBG • خنفشاري<br>
-<span style="font-size:9px">Original buttons preserved — No bugs — 1080p زر ظاهر</span>
+REKO STUDIO • المربع ينضغط هسه - قابل للضغط 100% • 1080p ظاهر • بس اللوحة تتغير<br>
+<span style="font-size:9px">Fixed clickable drop zone - المربع ينضغط</span>
 </div>
 <div class="modal-overlay" id="vfiModal">
 <div class="modal-card">
@@ -163,13 +160,9 @@ REKO STUDIO • Keep Quality • 1080p button visible now! • بصور PUBG •
 </button>
 </div>
 <div class="modal-body">
-<div class="modal-warning-block">
-<i class="ri-alert-fill"></i>
-<span>Performance Warning</span>
-</div>
 <ul class="modal-warning-list">
 <li>Processing speed depends on hardware.</li>
-<li>Output resolution controlled by selector above — 1080p visible!</li>
+<li>1080p button visible!</li>
 </ul>
 </div>
 <div class="modal-actions">
@@ -190,13 +183,8 @@ REKO STUDIO • Keep Quality • 1080p button visible now! • بصور PUBG •
 </button>
 </div>
 <div class="modal-body">
-<div class="modal-warning-block">
-<i class="ri-information-fill"></i>
-<span>Enable Desktop Mode First</span>
-</div>
 <ul class="modal-warning-list">
-<li>TikTok Studio upload only works in desktop mode.</li>
-<li>Chrome: 3-dot → Desktop site</li>
+<li>TikTok Studio only works in desktop mode.</li>
 </ul>
 </div>
 <div class="modal-actions">
@@ -214,7 +202,7 @@ function setRes1080(res, el){
   const logEl = document.getElementById('statusLog');
   if(logEl){
     const div = document.createElement('div');
-    div.textContent = '> ' + new Date().toLocaleTimeString() + ' — ⚡ Resolution: ' + res + ' - الف وثمانين ظاهر!';
+    div.textContent = '> ' + new Date().toLocaleTimeString() + ' — ⚡ Resolution: ' + res;
     logEl.appendChild(div);
     logEl.scrollTop = logEl.scrollHeight;
   }
