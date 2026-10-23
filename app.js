@@ -1,220 +1,1532 @@
+import {
+    clearAllRecords,
+    deleteRecord,
+    getAllRecords,
+    saveRecord,
+} from "./db.js";
+import { initChangelog } from "./src/changelog.mjs";
+import {
+    detectVideoCodecFromMoov,
+    findHandlerType,
+    getBoxHeaderSize,
+    parseBoxes,
+    updateBoxSize,
+    updateChunkOffsets,
+} from "./src/mp4-boxes.mjs";
+import { inflateSampleTableVideo } from "./src/mp4-inflate.mjs";
+import { normalizeContainer } from "./src/mp4-normalize.mjs";
 
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
-const $ = (id) => document.getElementById(id);
-let ffmpeg=null;
-let files=[];
+const FRAME_CAPTURE_TIMEOUT_MS = 5000;
+const METADATA_TIMEOUT_MS = 10000;
+const MAX_THUMBNAIL_DIMENSION = 120;
+const MOBILE_BREAKPOINT = 900;
+const DOWNLOAD_REVOKE_DELAY_MS = 1000;
+const PROGRESS_HIDE_DELAY_MS = 800;
+const PROGRESS_FADE_DURATION_MS = 400;
+const DOWNLOAD_INTERVAL_MS = 300;
+const PATCH_INTERVAL_MS = 600;
+const MOBILE_SCROLL_DELAY_MS = 150;
+const DOWNLOAD_ANCHOR_CLEANUP_MS = 100;
+const SAFE_THUMBNAIL_PREFIX = "data:image/jpeg;base64,";
 
-function log(msg){
-  const el=$('statusLog');
-  if(!el) return;
-  const div=document.createElement('div');
-  div.textContent='> '+new Date().toLocaleTimeString()+' — '+msg;
-  el.appendChild(div);
-  el.scrollTop=el.scrollHeight;
-  // Flash effect for log only
-  div.style.animation='fileSlide 0.3s ease-out';
-  div.style.color='#00FF88';
-  div.style.textShadow='0 0 10px #00FF88';
-  setTimeout(()=>{div.style.color='#10B981'; div.style.textShadow='none';}, 1000);
-}
+const outputSuffix = "_NoBlur → @wymidk0";
+const supportedMimeTypes = [
+    "video/mp4",
+    "video/quicktime",
+    "video/x-quicktime",
+];
+const supportedExtensions = [".mp4", ".mov"];
 
-async function initFFmpeg(){
-  if(ffmpeg) return ffmpeg;
-  log('⚡ Loading FFmpeg - بس اللوغ يتحرك...');
-  ffmpeg=new FFmpeg();
-  ffmpeg.on('progress',({progress})=>{
-    // Only log, no progress bar update for counters
-    if(progress > 0 && Math.round(progress*100) % 25 === 0){
-      log('⚡ Progress: '+Math.round(progress*100)+'% - بس اللوغ');
-    }
-  });
-  const base='https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
-  await ffmpeg.load({
-    coreURL:await toBlobURL(base+'/ffmpeg-core.js','text/javascript'),
-    wasmURL:await toBlobURL(base+'/ffmpeg-core.wasm','application/wasm')
-  });
-  log('⚡ FFmpeg Loaded - جاهز - العدادات ما تأثرت');
-  return ffmpeg;
-}
+const fileInput = document.getElementById("fileInput");
+const patchBtn = document.getElementById("patchBtn");
+const clearBtn = document.getElementById("clearBtn");
+const dropZone = document.getElementById("dropZone");
+const statusLog = document.getElementById("statusLog");
+const progressBar = document.getElementById("progressBar");
+const progressTrack = document.getElementById("progressTrack");
+const fileListEl = document.getElementById("fileList");
+const historyList = document.getElementById("historyList");
+const historyBadge = document.getElementById("historyBadge");
+const historyHeader = document.getElementById("historyHeader");
+const clearHistoryBtn = document.getElementById("clearHistoryBtn");
 
-// renderFiles - DISABLED - counters not affected
-function renderFiles(){
-  log('📁 Files added - but counters frozen - العدادات ثابتة - بس اللوغ يتحرك');
-  // Do NOT update fileList, badge, history - only log
-  // fileList stays empty, badge stays 0
-}
+let selectedFiles = [];
+let currentFlowState = "idle";
+let isCancelled = false;
+let processingFiles = false;
+let lastPatchedVfi = false;
+let lastPatchedRes = "1080";
 
-// addFiles - only log, no counter update
-function addFiles(fl){
-  log('✈️ '+fl.length+' video(s) dropped - بس لوحة النظام تتغير');
-  log('📊 FileList counter: FROZEN at 0 - ما تأثر');
-  log('📜 History badge: FROZEN at 0 - ثابت');
-  log('✅ Only SYSTEM LOG changes - بس اللوحة');
-  for(let file of fl){
-    log('🎬 File: '+file.name+' - '+(file.size/1024/1024).toFixed(1)+' MB - logged only');
-    files.push({file, res:'1080', is60:false, progress:0, status:'Logged only - بس باللوغ'});
-  }
-  // Do not call renderFiles that would update counters
-}
+let lastWidth = null;
+function adjustMobileLayout() {
+    const currentWidth = window.innerWidth;
+    if (lastWidth !== null && currentWidth === lastWidth) return;
+    lastWidth = currentWidth;
 
-const fileInput=$('fileInput');
-if(fileInput) fileInput.addEventListener('change',e=>{
-  log('📂 File input changed - بس اللوغ');
-  addFiles(e.target.files);
-});
-
-const dropZone=$('dropZone');
-if(dropZone){
-  dropZone.addEventListener('click',()=>{
-    log('🖱️ Drop zone clicked - بس اللوغ يتحرك');
-    const fi=$('fileInput');
-    if(fi) fi.click();
-  });
-  dropZone.addEventListener('dragover',e=>{
-    e.preventDefault();
-    e.currentTarget.classList.add('drag');
-    log('🌊 Drag over - ويف كهربائي - بس اللوغ');
-  });
-  dropZone.addEventListener('dragleave',e=>{
-    e.currentTarget.classList.remove('drag');
-    log('👋 Drag leave - بس اللوغ');
-  });
-  dropZone.addEventListener('drop',e=>{
-    e.preventDefault();
-    e.currentTarget.classList.remove('drag');
-    log('💧 Drop detected - '+e.dataTransfer.files.length+' files - بس اللوغ يتغير');
-    addFiles(e.dataTransfer.files);
-  });
-}
-
-const clearBtn=$('clearBtn');
-if(clearBtn) clearBtn.addEventListener('click',()=>{
-  log('🗑️ Clear clicked - بس اللوغ يتحرك - العدادات ثابتة');
-  files=[];
-  // Do not clear fileList display - keep it frozen
-  log('📊 Counters still frozen - ما تأثروا');
-});
-
-const enableInterp=$('enableInterpolation');
-if(enableInterp){
-  enableInterp.addEventListener('change',e=>{
-    if(e.target.checked){
-      const modal=$('vfiModal');
-      if(modal) modal.classList.add('open');
-      log('⚡ 60fps checkbox - بس اللوغ');
+    const isMobile = currentWidth <= MOBILE_BREAKPOINT;
+    const header = document.querySelector(".header");
+    const panelHeader = header ? header.parentNode : null;
+    const panelLeft = document.querySelector(".panel-left");
+    const panelRight = document.querySelector(".panel-right");
+    const dropZoneEl = document.getElementById("dropZone");
+    if (isMobile) {
+        if (dropZoneEl && panelHeader && dropZoneEl.parentNode !== panelHeader) {
+            panelHeader.after(dropZoneEl);
+        }
     } else {
-      log('⚡ 60fps unchecked - بس اللوغ');
+        if (dropZoneEl && panelRight && dropZoneEl.parentNode !== panelRight) {
+            panelRight.insertBefore(dropZoneEl, panelRight.firstChild);
+        }
     }
-  });
 }
 
-const closeVfi=$('closeVfiModalBtn');
-if(closeVfi) closeVfi.addEventListener('click',()=>{
-  const m=$('vfiModal');
-  if(m) m.classList.remove('open');
-  const ei=$('enableInterpolation');
-  if(ei) ei.checked=false;
-  log('❌ VFI modal closed - بس اللوغ');
-});
+function initializeApp() {
+    renderHistoryList();
+    adjustMobileLayout();
+    window.addEventListener("resize", adjustMobileLayout);
 
-const cancelVfi=$('cancelVfiBtn');
-if(cancelVfi) cancelVfi.addEventListener('click',()=>{
-  const m=$('vfiModal');
-  if(m) m.classList.remove('open');
-  const ei=$('enableInterpolation');
-  if(ei) ei.checked=false;
-  log('❌ VFI cancelled - بس اللوغ');
-});
-
-const confirmVfi=$('confirmVfiBtn');
-if(confirmVfi) confirmVfi.addEventListener('click',()=>{
-  const m=$('vfiModal');
-  if(m) m.classList.remove('open');
-  log('⚡ 60fps ENABLED - بس اللوغ يتحرك - العدادات ثابتة');
-});
-
-const historyHeader=$('historyHeader');
-if(historyHeader) historyHeader.addEventListener('click',()=>{
-  log('📜 History header clicked - بس اللوغ - العداد ثابت 0');
-  const d=$('historyDrawer');
-  if(d) d.classList.toggle('open');
-});
-
-const clearHistoryBtn=$('clearHistoryBtn');
-if(clearHistoryBtn) clearHistoryBtn.addEventListener('click',()=>{
-  log('🗑️ Clear history clicked - بس اللوغ - badge يبقى 0');
-});
-
-const copyLogBtn=$('copyLogBtn');
-if(copyLogBtn) copyLogBtn.addEventListener('click',async()=>{
-  const sl=$('statusLog');
-  if(!sl) return;
-  await navigator.clipboard.writeText(sl.innerText);
-  const t=$('copyLogToast');
-  if(t){t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1500);}
-  log('📋 Log copied - بس اللوغ');
-});
-
-const patchBtn=$('patchBtn');
-if(patchBtn) {
-  // Enable patch button even with no files for demo - but only log
-  patchBtn.disabled=false;
-  patchBtn.addEventListener('click',async()=>{
-    log('🚀 Patch Videos clicked - بس لوحة النظام تتغير!');
-    log('📊 FileList: FROZEN - ما تأثر');
-    log('📜 History: FROZEN - ثابت');
-    log('✅ Only SYSTEM STATUS LOG changes - هذا المطلوب');
-    
-    if(!files.length){
-      log('⚠️ No files - بس اللوغ يتحرك - مثال:');
-      log('🎬 Would process: video.mp4 - 1080p - 60fps');
-      log('⚡ FFmpeg: -i input.mp4 -vf scale=-2:1080 -r 60 -c:v libx264 -crf 18 output.mp4');
-      log('✅ Done - but counters still 0 - بس اللوغ تغير');
-      return;
+    const copyBtn = document.getElementById("copyLogBtn");
+    const copyToast = document.getElementById("copyLogToast");
+    if (copyBtn) {
+        let toastTimer = null;
+        copyBtn.addEventListener("click", async () => {
+            const text = [...statusLog.querySelectorAll(".log-row")]
+                .map((r) => r.textContent)
+                .join("\n");
+            if (!text) return;
+            try {
+                await navigator.clipboard.writeText(text);
+                if (copyToast) {
+                    copyToast.textContent = "Copied";
+                    copyToast.classList.add("show");
+                    clearTimeout(toastTimer);
+                    toastTimer = setTimeout(() => {
+                        copyToast.classList.remove("show");
+                    }, 1500);
+                }
+            } catch {
+                if (copyToast) {
+                    copyToast.textContent = "Copy failed";
+                    copyToast.classList.add("show");
+                    clearTimeout(toastTimer);
+                    toastTimer = setTimeout(() => {
+                        copyToast.classList.remove("show");
+                    }, 1500);
+                }
+            }
+        });
     }
-    
-    try{
-      const ff=await initFFmpeg();
-      for(let i=0;i<files.length;i++){
-        const it=files[i];
-        log('⚡ Processing: '+it.file.name+' - بس اللوغ');
-        const inName='input_'+i+'.mp4';
-        const outName='patched_'+i+'.mp4';
-        await ff.writeFile(inName, await fetchFile(it.file));
-        let args=['-i',inName];
-        if(it.res==='1080') args.push('-vf','scale=-2:1080');
-        else if(it.res==='1440') args.push('-vf','scale=-2:1440');
-        if(it.is60) args.push('-r','60');
-        args.push('-c:v','libx264','-crf','18','-preset','veryfast','-c:a','aac',outName);
-        log('⚡ FFmpeg: '+args.join(' ')+' - بس باللوغ');
-        await ff.exec(args);
-        const data=await ff.readFile(outName);
-        const url=URL.createObjectURL(new Blob([data.buffer],{type:'video/mp4'}));
-        const a=document.createElement('a');
-        a.href=url;
-        a.download='REKO_'+it.res+'_'+it.file.name;
-        a.click();
-        log('✅ Done: '+it.file.name+' - بس اللوغ - العدادات ثابتة 0');
-      }
-      log('🎉 ALL DONE - بس لوحة النظام تغيرت - العدادات ما تأثرت!');
-    }catch(e){
-      log('❌ Error: '+e.message+' - بس باللوغ');
-    }
-  });
 }
 
-function setRes1080(res, el){
-  document.querySelectorAll('.res-opt').forEach(o=>o.classList.remove('active'));
-  el.classList.add('active');
-  const sel = document.getElementById('outputResolution');
-  if(sel){ sel.value = res; }
-  log('⚡ Resolution: '+res+' - الف وثمانين - بس اللوغ يتحرك - العدادات ثابتة');
+function logMessage(text, type = "info") {
+    const row = document.createElement("div");
+    row.className = `log-row log-${type}`;
+    row.textContent = text;
+    statusLog.appendChild(row);
+    statusLog.scrollTop = statusLog.scrollHeight;
 }
 
-log('⚡ REKO - ONLY LOG MODE - بس لوحة النظام تتغير');
-log('🚫 Counters FROZEN - العدادات ثابتة');
-log('📁 FileList: 0 - ما يتغير');
-log('📜 History Badge: 0 - ثابت');
-log('✅ Only SYSTEM STATUS LOG changes - بس هاي اللوحة تتحرك');
-log('🎯 Drop video - شوف بس اللوغ يتحرك');
+function clearLog() {
+    statusLog.innerHTML = "";
+}
+
+function setLogCopyVisible(visible) {
+    const copyBtn = document.getElementById("copyLogBtn");
+    if (copyBtn) copyBtn.classList.toggle("visible", visible);
+}
+
+function setProgress(percent) {
+    progressBar.style.width = `${percent}%`;
+}
+
+function showProgress() {
+    progressTrack.classList.add("active");
+    progressTrack.style.opacity = "1";
+}
+
+function hideProgress() {
+    setTimeout(() => {
+        progressTrack.style.opacity = "0";
+        setTimeout(() => {
+            setProgress(0);
+            progressTrack.classList.remove("active");
+        }, PROGRESS_FADE_DURATION_MS);
+    }, PROGRESS_HIDE_DELAY_MS);
+}
+
+function isSupportedFile(file) {
+    const lowerName = file.name.toLowerCase();
+    return (
+        supportedMimeTypes.includes(file.type) ||
+        supportedExtensions.some((ext) => lowerName.endsWith(ext))
+    );
+}
+
+function getMimeType(file) {
+    return "video/mp4";
+}
+
+function isMovFile(file) {
+    const lowerName = file.name.toLowerCase();
+    if (lowerName.endsWith(".mov")) return true;
+    if (file.type === "video/quicktime" || file.type === "video/x-quicktime")
+        return true;
+    return false;
+}
+
+function getOutputFilename(file) {
+    const lastDotIndex = file.name.lastIndexOf(".");
+    const name =
+        lastDotIndex > 0 ? file.name.substring(0, lastDotIndex) : file.name;
+    return `${name}${outputSuffix}.mp4`;
+}
+
+function captureVideoFrame(file) {
+    return new Promise((resolve) => {
+        const video = document.createElement("video");
+        video.preload = "auto";
+        video.muted = true;
+        video.playsInline = true;
+        let settled = false;
+        let objectUrl = null;
+
+        function cleanup(result) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
+            video.onloadeddata = null;
+            video.onseeked = null;
+            video.onerror = null;
+            video.src = "";
+            video.load();
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+            }
+            resolve(result);
+        }
+
+        // Set event handlers BEFORE assigning src to prevent race condition
+        video.onloadeddata = () => {
+            if (settled) return;
+            video.currentTime = 0.1;
+        };
+
+        video.onseeked = () => {
+            if (settled) return;
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+            const maxDimension = MAX_THUMBNAIL_DIMENSION;
+            let width = video.videoWidth;
+            let height = video.videoHeight;
+
+            if (width > height) {
+                if (width > maxDimension) {
+                    height = Math.round((height * maxDimension) / width);
+                    width = maxDimension;
+                }
+            } else {
+                if (height > maxDimension) {
+                    width = Math.round((width * maxDimension) / height);
+                    height = maxDimension;
+                }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            ctx.drawImage(video, 0, 0, width, height);
+
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+            cleanup(dataUrl);
+        };
+
+        video.onerror = () => {
+            cleanup(null);
+        };
+
+        // Assign src AFTER handlers are set
+        objectUrl = URL.createObjectURL(file);
+        const timeoutId = setTimeout(() => {
+            cleanup(null);
+        }, FRAME_CAPTURE_TIMEOUT_MS);
+
+        video.src = objectUrl;
+    });
+}
+
+function formatFileSize(bytes) {
+    if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`;
+    if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+    return `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+function downloadBuffer(data, filename, mimeType) {
+    const blob =
+        data instanceof Blob ? data : new Blob([data], { type: mimeType });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    setTimeout(() => {
+        document.body.removeChild(anchor);
+    }, DOWNLOAD_ANCHOR_CLEANUP_MS);
+    setTimeout(() => {
+        URL.revokeObjectURL(objectUrl);
+    }, DOWNLOAD_REVOKE_DELAY_MS);
+}
+
+function getStatusLabel(status) {
+    return (
+        {
+            pending: "Pending",
+            processing: "Processing",
+            success: "Done",
+            error: "Error",
+        }[status] || status
+    );
+}
+
+function renderFileList() {
+    fileListEl.innerHTML = "";
+
+    if (selectedFiles.length === 0) {
+        fileListEl.style.display = "none";
+        clearBtn.style.display = "none";
+        return;
+    }
+
+    fileListEl.style.display = "flex";
+    clearBtn.style.display = "inline-flex";
+
+    let index = 0;
+    for (const item of selectedFiles) {
+        const removeIndex = index;
+        const row = document.createElement("div");
+        row.className = `file-item status-${item.status}`;
+
+        const checkboxWrapper = document.createElement("label");
+        checkboxWrapper.className = "custom-checkbox";
+        const checkboxInput = document.createElement("input");
+        checkboxInput.type = "checkbox";
+        checkboxInput.checked = item.checked;
+        if (
+            currentFlowState !== "completed" ||
+            item.status !== "success" ||
+            !item.patchedBuffer
+        ) {
+            checkboxInput.disabled = true;
+        }
+        checkboxInput.addEventListener("change", () => {
+            item.checked = checkboxInput.checked;
+            updatePatchButton();
+        });
+        const checkboxSpan = document.createElement("span");
+        checkboxSpan.className = "checkbox-mark";
+        checkboxWrapper.appendChild(checkboxInput);
+        checkboxWrapper.appendChild(checkboxSpan);
+        row.appendChild(checkboxWrapper);
+
+        const body = document.createElement("div");
+        body.className = "file-item-body";
+
+        const name = document.createElement("div");
+        name.className = "file-item-name";
+        name.textContent = item.name;
+
+        const meta = document.createElement("div");
+        meta.className = "file-item-meta";
+        meta.textContent = formatFileSize(item.size);
+
+        const fileProgressTrack = document.createElement("div");
+        fileProgressTrack.className = "file-item-progress";
+        const fileProgressBar = document.createElement("div");
+        fileProgressBar.className = "file-item-progress-bar";
+        fileProgressTrack.appendChild(fileProgressBar);
+
+        body.appendChild(name);
+        body.appendChild(meta);
+        body.appendChild(fileProgressTrack);
+
+        const icon = document.createElement("div");
+        icon.className = "file-item-icon";
+        const iconEl = document.createElement("i");
+        iconEl.className = "ri-movie-2-fill";
+        icon.appendChild(iconEl);
+
+        row.appendChild(icon);
+        row.appendChild(body);
+
+        const right = document.createElement("div");
+        right.className = "file-item-right";
+
+        const badge = document.createElement("span");
+        badge.className = `file-badge badge-${item.status}`;
+        badge.textContent = getStatusLabel(item.status);
+        right.appendChild(badge);
+
+        if (item.status === "pending" && currentFlowState !== "patching") {
+            const removeBtn = document.createElement("button");
+            removeBtn.className = "file-remove-btn";
+            const removeIcon = document.createElement("i");
+            removeIcon.className = "ri-close-fill";
+            removeBtn.appendChild(removeIcon);
+            removeBtn.addEventListener("click", (event) => {
+                event.stopPropagation();
+                removeFile(removeIndex);
+            });
+            right.appendChild(removeBtn);
+        }
+
+        row.appendChild(right);
+        fileListEl.appendChild(row);
+        index++;
+    }
+    // Remix Icon CSS handles rendering
+}
+
+async function addFiles(fileList) {
+    if (processingFiles || currentFlowState === "patching") return;
+    processingFiles = true;
+    try {
+        const filesArray = Array.from(fileList);
+        if (currentFlowState === "completed") {
+            selectedFiles = [];
+            currentFlowState = "idle";
+            setLogCopyVisible(false);
+        }
+        let skipped = 0;
+        for (const file of filesArray) {
+            if (!isSupportedFile(file)) {
+                skipped++;
+                continue;
+            }
+            const isDupe = selectedFiles.some(
+                (f) => f.name === file.name && f.size === file.size,
+            );
+            if (isDupe) {
+                logMessage(
+                    `Duplicate file detected: "${file.name}". Skipping.`,
+                    "warning",
+                );
+                continue;
+            }
+            selectedFiles.push({
+                file,
+                name: file.name,
+                size: file.size,
+                status: "pending",
+                patchedBuffer: null,
+                outputName: null,
+                mimeType: null,
+                checked: true,
+            });
+        }
+        if (skipped > 0) logMessage(`${skipped} file(s) skipped.`, "warning");
+        renderFileList();
+        updatePatchButton();
+        if (window.innerWidth <= MOBILE_BREAKPOINT) {
+            setTimeout(() => {
+                const controlBox = document.querySelector(".control-box");
+                if (controlBox) {
+                    controlBox.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                    });
+                }
+            }, MOBILE_SCROLL_DELAY_MS);
+        }
+    } finally {
+        processingFiles = false;
+    }
+}
+
+function removeFile(index) {
+    if (currentFlowState === "patching") return;
+    selectedFiles.splice(index, 1);
+    if (selectedFiles.length === 0) {
+        currentFlowState = "idle";
+    }
+    renderFileList();
+    updatePatchButton();
+}
+
+function updatePatchButton() {
+    const failedCount = selectedFiles.filter(
+        (f) => f.status === "error",
+    ).length;
+    if (failedCount > 0) {
+        patchBtn.disabled = false;
+        const retryLabel =
+            failedCount > 1 ? `Retry Failed (${failedCount})` : "Retry Failed";
+        patchBtn.querySelector("span").textContent = retryLabel;
+        return;
+    }
+
+    if (currentFlowState === "completed") {
+        const currentVfi = !!enableInterpolation?.checked;
+        const currentRes =
+            document.getElementById("outputResolution")?.value || "1080";
+        const settingsChanged =
+            currentVfi !== lastPatchedVfi || currentRes !== lastPatchedRes;
+
+        if (settingsChanged) {
+            patchBtn.disabled = false;
+            patchBtn.querySelector("span").textContent = "Repatch";
+        } else {
+            const checkedCount = selectedFiles.filter(
+                (f) => f.status === "success" && f.checked && f.patchedBuffer,
+            ).length;
+            patchBtn.disabled = checkedCount === 0;
+            const label =
+                checkedCount > 1
+                    ? `Download Selected (${checkedCount})`
+                    : checkedCount > 0
+                      ? "Download Selected"
+                      : "Patch Videos";
+            patchBtn.querySelector("span").textContent = label;
+        }
+    } else {
+        const pendingCount = selectedFiles.filter(
+            (f) => f.status === "pending",
+        ).length;
+        patchBtn.disabled =
+            pendingCount === 0 || currentFlowState === "patching";
+        const label =
+            pendingCount > 1
+                ? `Patch Videos (${pendingCount})`
+                : "Patch Videos";
+        patchBtn.querySelector("span").textContent = label;
+    }
+}
+
+function getDimensionsFromMp4Container(bytes, view) {
+    const top = parseBoxes(bytes, view, 0, bytes.length);
+    const moov = top.find((b) => b.type === "moov");
+    if (!moov) return null;
+
+    const moovCh = parseBoxes(
+        bytes,
+        view,
+        moov.offset + getBoxHeaderSize(moov),
+        moov.end,
+    );
+    for (const trak of moovCh.filter((b) => b.type === "trak")) {
+        const tch = parseBoxes(
+            bytes,
+            view,
+            trak.offset + getBoxHeaderSize(trak),
+            trak.end,
+        );
+        const tkhd = tch.find((b) => b.type === "tkhd");
+        const mdia = tch.find((b) => b.type === "mdia");
+        if (!tkhd || !mdia) continue;
+
+        const mch = parseBoxes(
+            bytes,
+            view,
+            mdia.offset + getBoxHeaderSize(mdia),
+            mdia.end,
+        );
+        const hdlr = mch.find((b) => b.type === "hdlr");
+        if (!hdlr) continue;
+        if (findHandlerType(bytes, hdlr) !== "vide") continue;
+
+        const cs = tkhd.offset + getBoxHeaderSize(tkhd);
+        const ver = bytes[cs];
+        const matrixOff = cs + (ver === 0 ? 40 : 52);
+        const widthOff = cs + (ver === 0 ? 76 : 88);
+
+        if (widthOff + 8 > tkhd.end) continue;
+
+        let w = view.getUint32(widthOff, false) >> 16;
+        let h = view.getUint32(widthOff + 4, false) >> 16;
+
+        if (matrixOff + 36 <= tkhd.end) {
+            const a = view.getInt32(matrixOff, false);
+            const b = view.getInt32(matrixOff + 4, false);
+            const isRotated90 = Math.abs(a) < 1000 && Math.abs(b) > 60000;
+            if (isRotated90) {
+                [w, h] = [h, w];
+            }
+        }
+
+        if (w > 0 && h > 0) return { width: w, height: h };
+    }
+    return null;
+}
+
+function getVideoDurationAndResolution(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const ab = e.target.result;
+            const bytes = new Uint8Array(ab);
+            const view = new DataView(ab);
+            const containerDims = getDimensionsFromMp4Container(bytes, view);
+
+            const video = document.createElement("video");
+            video.preload = "metadata";
+            video.muted = true;
+            video.playsInline = true;
+            let settled = false;
+            let objectUrl = null;
+
+            function cleanup(result) {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeoutId);
+                video.onloadedmetadata = null;
+                video.onerror = null;
+                video.src = "";
+                video.load();
+                if (objectUrl) URL.revokeObjectURL(objectUrl);
+                resolve(result);
+            }
+
+            objectUrl = URL.createObjectURL(file);
+            const timeoutId = setTimeout(() => {
+                if (containerDims) {
+                    cleanup({
+                        duration: 0,
+                        width: containerDims.width,
+                        height: containerDims.height,
+                    });
+                } else {
+                    cleanup(null);
+                }
+            }, METADATA_TIMEOUT_MS);
+
+            video.src = objectUrl;
+            video.onloadedmetadata = () => {
+                if (settled) return;
+                const bw = video.videoWidth;
+                const bh = video.videoHeight;
+                const duration = video.duration;
+                if (
+                    containerDims &&
+                    (bw === 0 || bh === 0 || !Number.isFinite(duration))
+                ) {
+                    cleanup({
+                        duration: 0,
+                        width: containerDims.width,
+                        height: containerDims.height,
+                    });
+                } else if (containerDims) {
+                    cleanup({
+                        duration,
+                        width: containerDims.width,
+                        height: containerDims.height,
+                    });
+                } else {
+                    cleanup({ duration, width: bw, height: bh });
+                }
+            };
+            video.onerror = () => {
+                if (containerDims) {
+                    cleanup({
+                        duration: 0,
+                        width: containerDims.width,
+                        height: containerDims.height,
+                    });
+                } else {
+                    cleanup(null);
+                }
+            };
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+let ffmpegInstance = null;
+
+async function destroyFFmpegInstance() {
+    if (!ffmpegInstance) return;
+    try {
+        await ffmpegInstance.terminate();
+    } catch (err) {
+        console.error("FFmpeg terminate failed:", err);
+    }
+    ffmpegInstance = null;
+}
+
+async function getFFmpeg() {
+    if (ffmpegInstance) return ffmpegInstance;
+
+    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+
+    ffmpegInstance = new FFmpeg();
+    logMessage("Loading VFI engine...", "info");
+    const isMultiThread =
+        typeof window.SharedArrayBuffer !== "undefined" &&
+        window.crossOriginIsolated;
+    const repoBase =
+        location.pathname.substring(0, location.pathname.lastIndexOf("/") + 1) ||
+        "/";
+    const absBase = new URL(repoBase, location.href).href;
+    const baseURL = `${absBase}${isMultiThread ? "ffmpeg-core-mt" : "ffmpeg-core"}`;
+    ffmpegInstance.on("progress", ({ progress }) => {
+        setProgress(Math.round(progress * 100));
+    });
+    try {
+        const loadConfig = {
+            coreURL: `${baseURL}/ffmpeg-core.js`,
+            wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+            classWorkerURL: `${absBase}ffmpeg-worker/worker.js`,
+        };
+        if (isMultiThread) {
+            loadConfig.workerURL = `${baseURL}/ffmpeg-core.worker.js`;
+        }
+        await ffmpegInstance.load(loadConfig);
+        logMessage("VFI engine loaded successfully.", "success");
+    } catch (err) {
+        await destroyFFmpegInstance();
+        throw err;
+    }
+    return ffmpegInstance;
+}
+
+function resolveInputExtension(file) {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".mov")) return ".mov";
+    if (lower.endsWith(".webm")) return ".webm";
+    return ".mp4";
+}
+
+async function runVFI(file, width, height, targetRes = 1080) {
+    const { fetchFile } = await import("@ffmpeg/util");
+
+    let instance;
+    try {
+        if (isCancelled) throw new Error("Cancelled");
+        instance = await getFFmpeg();
+        if (isCancelled) throw new Error("Cancelled");
+        const ext = resolveInputExtension(file);
+        const inputName = `input${ext}`;
+        const outputName = "output.mp4";
+
+        logMessage("Preparing video data streams...", "info");
+        await instance.writeFile(inputName, await fetchFile(file));
+        if (isCancelled) throw new Error("Cancelled");
+
+        const isMultiThread =
+            typeof window.SharedArrayBuffer !== "undefined" &&
+            window.crossOriginIsolated;
+        const threads = Math.max(1, Math.floor((navigator.hardwareConcurrency || 4) / 2));
+        if (!isMultiThread) {
+            logMessage(
+                "Notice: Single-threaded mode active. Enable HTTPS/cross-origin isolation for faster processing.",
+                "warning",
+            );
+        }
+
+        const vfiRes = Math.min(targetRes, 1080);
+        const meMode = isMobileDevice() ? "bidir" : "bilat";
+        const buildFilter = () => {
+            let f =
+                `mpdecimate,minterpolate=fps=60:mi_mode=mci:me_mode=${meMode}:me=epzs:search_param=4:scd=none`;
+            if (width > height) {
+                f = `scale=-2:${vfiRes},${f}`;
+            } else {
+                f = `scale=${vfiRes}:-2,${f}`;
+            }
+            if (vfiRes !== targetRes) {
+                if (width > height) {
+                    f = `${f},scale=-2:${targetRes}:flags=lanczos`;
+                } else {
+                    f = `${f},scale=${targetRes}:-2:flags=lanczos`;
+                }
+            }
+            return f;
+        };
+        const buildArgs = (filter, out, extra = []) => [
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            inputName,
+            "-vf",
+            filter,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "20",
+            ...extra,
+            "-video_track_timescale",
+            "90000",
+            "-threads",
+            String(threads),
+            out,
+        ];
+        const runAndRead = async (args, out, keepFile = false) => {
+            let ffmpegLog = "";
+            const logHandler = ({ message }) => {
+                ffmpegLog += message + "\n";
+            };
+            instance.on("log", logHandler);
+            const ret = await instance.exec(args);
+            instance.off?.("log", logHandler);
+            if (ret !== 0) {
+                const tail = ffmpegLog.trim().split("\n").slice(-12).join("\n");
+                logMessage("VFI ffmpeg failed (exit " + ret + "):", "error");
+                if (tail) logMessage(tail, "error");
+                await instance.deleteFile(inputName).catch(() => {});
+                await instance.deleteFile(out).catch(() => {});
+                progressBar.classList.remove("indeterminate");
+                throw new Error("VFI ffmpeg failed with exit code " + ret);
+            }
+            const data = await instance.readFile(out);
+            if (!data || data.length < 100) {
+                logMessage("VFI produced empty or invalid output.", "error");
+                await instance.deleteFile(inputName).catch(() => {});
+                await instance.deleteFile(out).catch(() => {});
+                progressBar.classList.remove("indeterminate");
+                throw new Error("VFI produced no output");
+            }
+            if (!keepFile) {
+                await instance.deleteFile(out).catch(() => {});
+            }
+            return data;
+        };
+
+        logMessage(
+            "Interpolating video frames to 60fps... This may take up to a minute.",
+            "info",
+        );
+        showProgress();
+        progressBar.classList.add("indeterminate");
+
+        const outputData = await runAndRead(
+            buildArgs(buildFilter(), outputName, ["-c:a", "copy"]),
+            outputName,
+        );
+
+        logMessage("Completed frame processing.", "success");
+        const head = String.fromCharCode(...outputData.slice(4, 12));
+        logMessage(`  VFI output: ${outputData.length} bytes, head="${head}"`, "info");
+
+        await instance.deleteFile(inputName).catch(() => {});
+        progressBar.classList.remove("indeterminate");
+
+        return outputData.slice().buffer;
+    } catch (err) {
+        await destroyFFmpegInstance();
+        throw err;
+    }
+}
+
+async function extractMovThumbnailFFmpeg(file) {
+    const { fetchFile } = await import("@ffmpeg/util");
+    let instance;
+    try {
+        instance = await getFFmpeg();
+        const ext = isMovFile(file) ? ".mov" : ".mp4";
+        const inputName = `thumb_input${ext}`;
+        await instance.writeFile(inputName, await fetchFile(file));
+        await instance.exec([
+            "-y",
+            "-loglevel",
+            "error",
+            "-ss",
+            "0.1",
+            "-i",
+            inputName,
+            "-vframes",
+            "1",
+            "-f",
+            "mjpeg",
+            "thumb.jpg",
+        ]);
+        const data = await instance.readFile("thumb.jpg");
+        await instance.deleteFile(inputName).catch(() => {});
+        await instance.deleteFile("thumb.jpg").catch(() => {});
+        if (data && data.length > 100) {
+            const bytes = new Uint8Array(data.buffer, data.byteOffset, data.length);
+            let binary = "";
+            for (let j = 0; j < bytes.length; j++) {
+                binary += String.fromCharCode(bytes[j]);
+            }
+            return `data:image/jpeg;base64,${btoa(binary)}`;
+        }
+    } catch (_) {
+        return null;
+    } finally {
+        await destroyFFmpegInstance();
+    }
+    return null;
+}
+async function patchSingleFile(item) {
+    const resolutionEl = document.getElementById("outputResolution");
+    const targetRes = resolutionEl
+        ? Number.parseInt(resolutionEl.value, 10)
+        : 1080;
+
+    let sourceBuffer = null;
+    let movThumbnail = null;
+    let videoInfo = null;
+
+    if (isMovFile(item.file) && !enableInterpolation?.checked) {
+        logMessage("Processing MOV file directly...", "info");
+        try {
+            movThumbnail = await captureVideoFrame(item.file);
+        } catch (_) {
+            movThumbnail = null;
+        }
+        if (isCancelled) throw new Error("Cancelled");
+    }
+
+    if (enableInterpolation?.checked) {
+        const fileBytes = new Uint8Array(await item.file.arrayBuffer());
+        const fileView = new DataView(fileBytes.buffer);
+        const dims = getDimensionsFromMp4Container(fileBytes, fileView);
+        const topBoxes = parseBoxes(fileBytes, fileView, 0, fileBytes.length);
+        const moovBox = topBoxes.find((b) => b.type === "moov");
+        let codec = null;
+        if (moovBox) {
+            codec = detectVideoCodecFromMoov(fileBytes, fileView, moovBox);
+        }
+
+        if (!dims) {
+            throw new Error("Could not parse video dimensions from container.");
+        }
+
+        if (codec === "hvc1" || codec === "hev1") {
+            const container = isMovFile(item.file) ? "MOV" : "MP4";
+            logMessage(
+                `HEVC ${container} (${codec}) detected - using multi-thread VFI engine.`,
+                "info"
+            );
+        } else {
+            logMessage(
+                "Starting VFI Engine for 60fps interpolation...",
+                "info",
+            );
+        }
+        if (isCancelled) throw new Error("Cancelled");
+
+        videoInfo = await getVideoDurationAndResolution(item.file);
+        if (isCancelled) throw new Error("Cancelled");
+
+        const workingBuffer = await runVFI(
+            item.file,
+            dims.width,
+            dims.height,
+            targetRes,
+        );
+        sourceBuffer = workingBuffer;
+        logMessage(
+            "VFI interpolation complete. Proceeding to binary patch pipeline...",
+            "success",
+        );
+
+        await destroyFFmpegInstance();
+        logMessage("VFI engine reset for binary patch pipeline...", "info");
+
+        if (codec === "hvc1" || codec === "hev1") {
+            try {
+                movThumbnail = await extractMovThumbnailFFmpeg(item.file);
+            } catch (_) {
+                movThumbnail = null;
+            }
+        }
+
+    }
+    if (isCancelled) throw new Error("Cancelled");
+
+    if (!sourceBuffer) {
+        videoInfo = await getVideoDurationAndResolution(item.file);
+        if (isCancelled) throw new Error("Cancelled");
+        if (!videoInfo && !isMovFile(item.file)) {
+            throw new Error("Could not parse video metadata.");
+        }
+    } else if (!videoInfo) {
+        videoInfo = await getVideoDurationAndResolution(item.file);
+    }
+
+    const mimeType = getMimeType(item.file);
+    const outputName = getOutputFilename(item.file);
+
+    let inputBytes;
+    let inputView;
+
+    if (sourceBuffer) {
+        inputBytes = new Uint8Array(sourceBuffer);
+        inputView = new DataView(sourceBuffer);
+        logMessage("  Source: VFI 60fps output", "info");
+    } else {
+        inputBytes = new Uint8Array(await item.file.arrayBuffer());
+        inputView = new DataView(inputBytes.buffer);
+        if (videoInfo) {
+            logMessage(
+                `  Source: ${videoInfo.width}x${videoInfo.height} (${
+                    videoInfo.width > videoInfo.height
+                        ? "landscape"
+                        : "portrait"
+                })`,
+                "info",
+            );
+        } else {
+            logMessage(
+                "  Source: MOV file (dimensions from container)",
+                "info",
+            );
+        }
+    }
+
+    logMessage("  Normalizing container...", "info");
+    const normalized = normalizeContainer(inputBytes, inputView);
+    let finalBuffer = normalized.newBuffer;
+    let finalBytes = normalized.newBytes;
+    let finalView = normalized.newView;
+
+    if (normalized.changed) {
+        logMessage("  Container normalized.", "success");
+    } else if (!normalized.valid) {
+        throw new Error("Invalid container: moov box not found");
+    } else {
+        logMessage("  Container already normalized.", "info");
+    }
+
+    const inflateResult = inflateSampleTableVideo(finalBytes, finalView, 10);
+    finalBuffer = inflateResult.newBuffer;
+    finalBytes = inflateResult.newBytes;
+    finalView = new DataView(finalBuffer);
+    logMessage("  Frame Density Inflation: Applied.", "success");
+
+    return {
+        finalBuffer,
+        outputName,
+        mimeType,
+        prePatchBuffer: sourceBuffer,
+        movThumbnail,
+    };
+}
+
+async function downloadSelectedFiles() {
+    const selectedToDownload = selectedFiles.filter(
+        (f) => f.status === "success" && f.checked && f.patchedBuffer,
+    );
+    if (selectedToDownload.length === 0) return;
+
+    logMessage(
+        `Starting download for ${selectedToDownload.length} file(s)...`,
+        "info",
+    );
+
+    for (let i = 0; i < selectedToDownload.length; i++) {
+        const item = selectedToDownload[i];
+        logMessage(`  Downloading: ${item.outputName}`, "success");
+        downloadBuffer(item.patchedBuffer, item.outputName, item.mimeType);
+        item.patchedBuffer = null;
+        item.file = null;
+        item.checked = false;
+
+        if (i < selectedToDownload.length - 1) {
+            await new Promise((r) => setTimeout(r, DOWNLOAD_INTERVAL_MS));
+        }
+    }
+
+    logMessage("All selected downloads triggered successfully.", "success");
+    renderFileList();
+    updatePatchButton();
+}
+
+dropZone.addEventListener("click", () => {
+    fileInput.click();
+});
+
+fileInput.addEventListener("change", (event) => {
+    if (event.target.files.length > 0) addFiles(event.target.files);
+    fileInput.value = "";
+});
+
+clearBtn.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (currentFlowState === "patching") {
+        isCancelled = true;
+        logMessage("Cancelling active interpolation progress...", "warning");
+        await destroyFFmpegInstance();
+        return;
+    }
+    selectedFiles = [];
+    currentFlowState = "idle";
+    setLogCopyVisible(false);
+    hideProgress();
+    clearLog();
+    renderFileList();
+    updatePatchButton();
+});
+
+dropZone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    dropZone.classList.add("drag-over");
+});
+
+dropZone.addEventListener("dragleave", () => {
+    dropZone.classList.remove("drag-over");
+});
+
+dropZone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropZone.classList.remove("drag-over");
+    if (event.dataTransfer.files.length > 0) addFiles(event.dataTransfer.files);
+});
+
+let wakeLock = null;
+
+async function acquireWakeLock() {
+    if (!("wakeLock" in navigator)) return;
+    try {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => {
+            if (currentFlowState === "patching") {
+                acquireWakeLock();
+            }
+        });
+    } catch (_) {
+        wakeLock = null;
+    }
+}
+
+function releaseWakeLock() {
+    if (wakeLock) {
+        wakeLock.release().catch(() => {});
+        wakeLock = null;
+    }
+}
+
+document.addEventListener("visibilitychange", () => {
+    if (
+        document.visibilityState === "visible" &&
+        currentFlowState === "patching" &&
+        !wakeLock
+    ) {
+        acquireWakeLock();
+    }
+});
+
+patchBtn.addEventListener("click", async () => {
+    const failedItems = selectedFiles.filter((f) => f.status === "error");
+    if (failedItems.length > 0) {
+        for (const item of failedItems) {
+            item.status = "pending";
+            item.checked = true;
+            item.patchedBuffer = null;
+        }
+        currentFlowState = "idle";
+        setLogCopyVisible(false);
+        renderFileList();
+        updatePatchButton();
+    }
+
+    if (currentFlowState === "completed") {
+        const currentVfi = !!enableInterpolation?.checked;
+        const currentRes =
+            document.getElementById("outputResolution")?.value || "1080";
+        const settingsChanged =
+            currentVfi !== lastPatchedVfi || currentRes !== lastPatchedRes;
+
+        if (settingsChanged) {
+            for (const item of selectedFiles) {
+                if (item.status === "success" || item.status === "error") {
+                    item.status = "pending";
+                    item.checked = true;
+                    item.patchedBuffer = null;
+                }
+            }
+            currentFlowState = "idle";
+            setLogCopyVisible(false);
+            renderFileList();
+            updatePatchButton();
+        } else {
+            const checkedCount = selectedFiles.filter(
+                (f) =>
+                    f.status === "success" && f.checked && f.patchedBuffer,
+            ).length;
+            if (checkedCount > 0) {
+                await downloadSelectedFiles();
+                return;
+            }
+        }
+    }
+
+    const pendingItems = selectedFiles.filter((f) => f.status === "pending");
+    if (pendingItems.length === 0) return;
+
+    currentFlowState = "patching";
+    lastPatchedVfi = !!enableInterpolation?.checked;
+    lastPatchedRes =
+        document.getElementById("outputResolution")?.value || "1080";
+    setLogCopyVisible(false);
+    clearLog();
+    patchBtn.disabled = true;
+    clearBtn.innerText = "Cancel";
+    clearBtn.disabled = false;
+    showProgress();
+    await acquireWakeLock();
+
+    isCancelled = false;
+    let successCount = 0;
+
+    for (let i = 0; i < pendingItems.length; i++) {
+        if (isCancelled) {
+            break;
+        }
+        const item = pendingItems[i];
+        setProgress(Math.round((i / pendingItems.length) * 100));
+
+        item.status = "processing";
+        renderFileList();
+        logMessage(`[${i + 1}/${pendingItems.length}] ${item.name}`, "info");
+
+        try {
+            const result = await patchSingleFile(item);
+            if (isCancelled) {
+                item.status = "pending";
+                break;
+            }
+            item.status = "success";
+            item.patchedBuffer = result.finalBuffer;
+            item.outputName = result.outputName;
+            item.mimeType = result.mimeType;
+            item.checked = true;
+            successCount++;
+
+            if (
+                item.status === "success" &&
+                result.finalBuffer &&
+                result.finalBuffer.byteLength !== undefined
+            ) {
+                try {
+                    if (isCancelled) break;
+                    const blob = new Blob([result.finalBuffer], {
+                        type: result.mimeType,
+                    });
+
+                    let thumbnail = null;
+                    if (result.movThumbnail) {
+                        thumbnail = result.movThumbnail;
+                        logMessage(
+                            "Thumbnail captured from MOV extraction",
+                            "info",
+                        );
+                    }
+                    if (!thumbnail) {
+                        try {
+                            thumbnail = await captureVideoFrame(blob);
+                            if (thumbnail) {
+                                logMessage(
+                                    "Thumbnail captured from output",
+                                    "info",
+                                );
+                            }
+                        } catch (_) {
+                            // HEVC output can't be decoded by browser
+                        }
+                    }
+                    if (!thumbnail && !isMovFile(item.file)) {
+                        thumbnail = await captureVideoFrame(item.file);
+                        if (thumbnail) {
+                            logMessage(
+                                "Thumbnail captured from original file",
+                                "info",
+                            );
+                        }
+                    }
+                    if (isCancelled) break;
+
+                    if (!thumbnail) {
+                        logMessage(
+                            "Warning: No thumbnail available for history entry",
+                            "warning",
+                        );
+                    }
+                    await saveRecord({
+                        id: self.crypto.randomUUID(),
+                        name: result.outputName,
+                        size: result.finalBuffer.byteLength,
+                        timestamp: Date.now(),
+                        thumbnail,
+                        blob,
+                        mimeType: result.mimeType,
+                    });
+                    await renderHistoryList();
+                } catch (dbError) {
+                    logMessage(
+                        `  Database save skipped: ${dbError.message}`,
+                        "warning",
+                    );
+                }
+            }
+
+            if (i < pendingItems.length - 1) {
+                if (isCancelled) {
+                    break;
+                }
+                await new Promise((r) => setTimeout(r, PATCH_INTERVAL_MS));
+                if (isCancelled) {
+                    break;
+                }
+            }
+        } catch (error) {
+            if (isCancelled) {
+                item.status = "pending";
+                break;
+            }
+            item.status = "error";
+            item.checked = false;
+            const msg =
+                error instanceof Error
+                    ? error.message
+                    : String(error);
+            logMessage(`  Error: ${msg}`, "error");
+        }
+
+        renderFileList();
+    }
+
+    if (isCancelled) {
+        for (const item of pendingItems) {
+            if (item.status === "processing" || item.status === "pending") {
+                item.status = "pending";
+            }
+        }
+        currentFlowState = "idle";
+        setProgress(0);
+        hideProgress();
+        releaseWakeLock();
+        setLogCopyVisible(false);
+        clearBtn.innerText = "Clear";
+        logMessage("Interpolation progress cancelled by user.", "warning");
+        renderFileList();
+        updatePatchButton();
+        // Remix Icon CSS handles rendering
+        return;
+    }
+
+    currentFlowState =
+        successCount === pendingItems.length ? "completed" : "idle";
+    setProgress(100);
+    releaseWakeLock();
+    setLogCopyVisible(true);
+    logMessage(
+        `Done. ${successCount}/${pendingItems.length} file(s) patched successfully.`,
+        successCount === pendingItems.length ? "success" : "warning",
+    );
+    hideProgress();
+
+    clearBtn.innerText = "Clear";
+    clearBtn.disabled = false;
+    renderFileList();
+    updatePatchButton();
+    // Remix Icon CSS handles rendering
+});
+
+async function renderHistoryList() {
+    const records = await getAllRecords();
+    historyList.innerHTML = "";
+    historyBadge.textContent = records.length;
+
+    if (records.length === 0) {
+        historyList.innerHTML = `<div class="history-item-empty">No history records found</div>`;
+        // Remix Icon CSS handles rendering
+        return;
+    }
+
+    for (const record of records) {
+        const item = document.createElement("div");
+        item.className = "history-item";
+
+        const thumb = document.createElement("div");
+        thumb.className = "history-thumbnail";
+        if (record.thumbnail?.startsWith(SAFE_THUMBNAIL_PREFIX)) {
+            const img = document.createElement("img");
+            img.src = record.thumbnail;
+            img.alt = "preview";
+            thumb.appendChild(img);
+        } else {
+            const icon = document.createElement("i");
+            icon.className = "ri-movie-2-fill";
+            thumb.appendChild(icon);
+        }
+
+        const body = document.createElement("div");
+        body.className = "history-item-body";
+
+        const name = document.createElement("div");
+        name.className = "history-item-name";
+        name.textContent = record.name;
+
+        const meta = document.createElement("div");
+        meta.className = "history-item-meta";
+        meta.textContent = `${formatFileSize(record.size)} • ${new Date(
+            record.timestamp,
+        ).toLocaleTimeString()}`;
+
+        body.appendChild(name);
+        body.appendChild(meta);
+
+        const actions = document.createElement("div");
+        actions.className = "history-item-actions";
+
+        const dlBtn = document.createElement("button");
+        dlBtn.className = "history-btn";
+        const dlIcon = document.createElement("i");
+        dlIcon.className = "ri-download-fill";
+        dlBtn.appendChild(dlIcon);
+        dlBtn.addEventListener("click", () => {
+            downloadBuffer(
+                record.blob || record.buffer,
+                record.name,
+                record.mimeType || "video/mp4",
+            );
+        });
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "history-btn history-btn-delete";
+        const delIcon = document.createElement("i");
+        delIcon.className = "ri-delete-bin-fill";
+        delBtn.appendChild(delIcon);
+        delBtn.addEventListener("click", async () => {
+            await deleteRecord(record.id);
+            await renderHistoryList();
+        });
+
+        actions.appendChild(dlBtn);
+        actions.appendChild(delBtn);
+
+        item.appendChild(thumb);
+        item.appendChild(body);
+        item.appendChild(actions);
+
+        historyList.appendChild(item);
+    }
+    // Remix Icon CSS handles rendering
+}
+
+historyHeader.addEventListener("click", () => {
+    const container = historyHeader.parentElement;
+    container.classList.toggle("collapsed");
+});
+
+clearHistoryBtn.addEventListener("click", async () => {
+    await clearAllRecords();
+    await renderHistoryList();
+});
+
+let scrollPosition = 0;
+
+function lockScroll() {
+    scrollPosition = window.pageYOffset;
+    document.body.style.overflow = "hidden";
+    document.body.style.top = `-${scrollPosition}px`;
+    document.body.style.position = "fixed";
+    document.body.style.width = "100%";
+}
+
+function unlockScroll() {
+    document.body.style.overflow = "";
+    document.body.style.position = "";
+    document.body.style.top = "";
+    document.body.style.width = "";
+    window.scrollTo(0, scrollPosition);
+}
+
+const enableInterpolation = document.getElementById("enableInterpolation");
+const vfiModal = document.getElementById("vfiModal");
+const closeVfiModalBtn = document.getElementById("closeVfiModalBtn");
+const cancelVfiBtn = document.getElementById("cancelVfiBtn");
+const confirmVfiBtn = document.getElementById("confirmVfiBtn");
+
+if (enableInterpolation && vfiModal) {
+    const resolutionBox = document.getElementById("vfiResolutionBox");
+
+    enableInterpolation.addEventListener("change", () => {
+        if (enableInterpolation.checked) {
+            vfiModal.classList.add("active");
+            lockScroll();
+        }
+        if (resolutionBox) {
+            resolutionBox.style.display = enableInterpolation.checked
+                ? "block"
+                : "none";
+        }
+        updatePatchButton();
+    });
+
+    const outputResolution = document.getElementById("outputResolution");
+    if (outputResolution) {
+        outputResolution.addEventListener("change", () => {
+            updatePatchButton();
+        });
+    }
+
+    const closeModal = () => {
+        vfiModal.classList.remove("active");
+        unlockScroll();
+        if (resolutionBox) {
+            resolutionBox.style.display = enableInterpolation.checked
+                ? "block"
+                : "none";
+        }
+    };
+
+    const cancelModal = () => {
+        enableInterpolation.checked = false;
+        closeModal();
+    };
+
+    closeVfiModalBtn?.addEventListener("click", cancelModal);
+    cancelVfiBtn?.addEventListener("click", cancelModal);
+    confirmVfiBtn?.addEventListener("click", closeModal);
+
+    vfiModal.addEventListener("click", (e) => {
+        if (e.target === vfiModal) cancelModal();
+    });
+}
+
+const tiktokModal = document.getElementById("tiktokModal");
+const tiktokStudioBtn = document.getElementById("tiktokStudioBtn");
+const closeTiktokModalBtn = document.getElementById("closeTiktokModalBtn");
+const cancelTiktokModalBtn = document.getElementById("cancelTiktokModalBtn");
+const confirmTiktokBtn = document.getElementById("confirmTiktokBtn");
+
+function isMobileDevice() {
+    return (
+        window.innerWidth <= MOBILE_BREAKPOINT ||
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+    );
+}
+
+if (tiktokStudioBtn && tiktokModal) {
+    tiktokStudioBtn.addEventListener("click", (e) => {
+        if (isMobileDevice()) {
+            e.preventDefault();
+            tiktokModal.classList.add("active");
+            lockScroll();
+        }
+    });
+
+    const closeTiktokModal = () => {
+        tiktokModal.classList.remove("active");
+        unlockScroll();
+    };
+
+    closeTiktokModalBtn?.addEventListener("click", closeTiktokModal);
+    cancelTiktokModalBtn?.addEventListener("click", closeTiktokModal);
+    confirmTiktokBtn?.addEventListener("click", closeTiktokModal);
+
+    tiktokModal.addEventListener("click", (e) => {
+        if (e.target === tiktokModal) closeTiktokModal();
+    });
+}
+
+initializeApp();
+
+const changelogContainer = document.getElementById("changelogContainer");
+if (changelogContainer) {
+    initChangelog(changelogContainer);
+}
